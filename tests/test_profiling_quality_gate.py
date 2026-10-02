@@ -166,3 +166,14 @@ def test_bulk_create_rejects_invalid_input_atomically(app, client, payload, mess
     assert message in response.get_json()["error"]
     with app.app_context():
         assert QualityCheck.query.count() == 0
+
+
+def test_unique_amounts_are_not_keys_and_zero_one_columns_are_flags():
+    records = [{"employee_id": f"EMP{i}", "salary": str(1000 + i * 37), "fraud_flag": str(i % 2)}
+               for i in range(20)]
+    profile = profile_records(records)
+    assert profile["key_candidates"] == ["employee_id"]
+    assert _column(profile, "fraud_flag")["inferred_type"] == "boolean"
+    suggestions = {(item["field_name"], item["check_type"]): item for item in suggest_quality_checks(profile)}
+    assert ("salary", "unique") not in suggestions
+    assert suggestions[("fraud_flag", "accepted_values")]["parameters"]["values"] == ["0", "1"]

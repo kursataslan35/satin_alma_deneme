@@ -46,7 +46,8 @@ def execute_quality_check(check: QualityCheck) -> QualityCheckRun:
     parameters = check.parameters or {}
     counts = Counter(_stable_value(record.get(field)) for record in records
                      if record.get(field) not in (None, "")) if check.check_type == "unique" else Counter()
-    accepted = {_stable_value(item) for item in parameters.get("values", [])}
+    # Compare as trimmed text so "1" from a CSV and 1 from an XLSX match the same listed value.
+    accepted = {str(item).strip() for item in parameters.get("values", [])}
 
     for index, record in enumerate(records):
         value = record.get(field)
@@ -63,7 +64,7 @@ def execute_quality_check(check: QualityCheck) -> QualityCheckRun:
             except (TypeError, ValueError):
                 failed = True
         elif check.check_type == "accepted_values":
-            failed = _stable_value(value) not in accepted
+            failed = _empty(value) or str(value).strip() not in accepted
         elif check.check_type == "type_conformance":
             # Blank cells are completeness, not format, problems; not_null covers them.
             failed = not _empty(value) and not _conforms(value, parameters.get("type", "number"))

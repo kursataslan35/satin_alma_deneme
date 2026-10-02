@@ -23,6 +23,10 @@ KEY_LIKE_UNIQUE_PCT = 95
 RARE_VALUE_MIN_ROWS = 50
 BOOLEAN_VALUES = {"true", "false", "evet", "hayır", "hayir", "yes", "no", "e", "h", "y", "n"}
 _HAS_DATE_SEPARATOR = re.compile(r"\d[-./]\d")
+# Numeric columns are identifiers only when their name says so; amounts can be unique by chance.
+_IDENTIFIER_NAME = re.compile(r"(^|[_\s-])(id|no|nr|kod|kodu|code|numara|numarasi|num|sicil)($|[_\s-])|id$",
+                              re.IGNORECASE)
+FLAG_VALUES = {"0", "1"}
 
 
 def _is_empty(value: Any) -> bool:
@@ -114,7 +118,9 @@ def profile_column(name: str, values: list[Any], *, today: date) -> dict[str, An
         if inferred == "number" and all(parsed.is_integer() for item_kind, parsed in classified
                                         if item_kind == "number"):
             inferred = "integer"
-    identifier_type = inferred in {"text", "integer"}
+        if inferred == "integer" and {str(value).strip() for value in present} <= FLAG_VALUES:
+            inferred = "boolean"
+    identifier_type = inferred == "text" or (inferred == "integer" and bool(_IDENTIFIER_NAME.search(name)))
     profile: dict[str, Any] = {
         "name": name, "inferred_type": inferred, "type_breakdown": dict(kinds),
         "row_count": total, "filled_count": filled, "empty_count": total - filled,
@@ -239,7 +245,7 @@ def suggest_quality_checks(profile: Mapping[str, Any]) -> list[dict[str, Any]]:
             suggest(column, "numeric_range", "warning", "Tüm değerler sıfır veya pozitif",
                     {"min": 0})
         text = column.get("text", {})
-        if (inferred == "text" and 1 < column["distinct_count"] <= MAX_ACCEPTED_VALUES
+        if (inferred in {"text", "boolean"} and 1 < column["distinct_count"] <= MAX_ACCEPTED_VALUES
                 and column["filled_count"] >= 3 * column["distinct_count"]
                 and not text.get("variant_group_count") and not text.get("whitespace_issue_count")):
             # Values seen only once in a large file are more likely typos than valid codes.
