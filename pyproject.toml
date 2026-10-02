@@ -1,0 +1,21 @@
+[project]
+name = "auditai"
+version = "0.1.0"
+description = "Data-driven internal audit and compliance analytics platform."
+readme = "docs/README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.1.1",
+    "flask-sqlalchemy>=3.1.1",
+    "flask-migrate>=4.1.0",
+    "gunicorn>=23.0.0",
+    "openpyxl>=3.1.5",
+    "psycopg[binary]>=3.2.9",
+    "python-docx>=1.1.0",
+    "sqlalchemy>=2.0.41",
+    "pytest>=8.3.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Functional AuditAI audit analytics prototype">
+  <title>AuditAI | Control Monitoring</title>
+  <style>
+    :root { color-scheme: dark; --bg:#07111f; --panel:#0f1d2e; --line:#24364d; --text:#e8eef7; --muted:#9fb0c5; --cyan:#67e8f9; --green:#5eead4; --red:#fca5a5; }
+    * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,sans-serif; }
+    header { padding:3rem max(5vw,1rem); background:radial-gradient(circle at top right,#164e63,var(--bg) 55%); }
+    main { width:min(1180px,90vw); margin:auto; padding:2rem 0 4rem; } h1 { font-size:clamp(2.6rem,7vw,5rem); margin:.2rem 0; }
+    .eyebrow,.metric strong { color:var(--cyan); } .muted { color:var(--muted); } .grid { display:grid; gap:1rem; }
+    .metrics { grid-template-columns:repeat(4,1fr); margin:1.5rem 0; } .metric,.panel { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:1.25rem; }
+    .metric strong { display:block; font-size:2rem; } .columns { grid-template-columns:1fr 1.6fr; align-items:start; }
+    h2 { margin-top:0; } label { display:block; color:var(--muted); margin:.7rem 0 .25rem; } input,select,button { width:100%; padding:.7rem; border-radius:8px; border:1px solid var(--line); background:#091625; color:var(--text); }
+    button { cursor:pointer; background:#0e7490; border-color:#22d3ee; font-weight:700; } button.secondary { width:auto; background:transparent; padding:.4rem .7rem; }
+    .rule,.alarm { border-top:1px solid var(--line); padding:1rem 0; } .row { display:flex; justify-content:space-between; gap:1rem; align-items:center; }
+    .badge { font-size:.75rem; padding:.2rem .5rem; border-radius:999px; background:#23364d; text-transform:uppercase; } .critical,.high { color:var(--red); } .low { color:var(--green); }
+    #message { min-height:1.5rem; color:var(--green); } details { margin-top:.5rem; color:var(--muted); } pre { overflow:auto; white-space:pre-wrap; }
+    @media(max-width:800px){ .metrics,.columns { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<header><div class="eyebrow">Internal Audit × Data Analytics</div><h1>AuditAI</h1><p class="muted">Run configurable controls against synthetic records and manage the resulting audit alerts.</p></header>
+<main>
+  <div class="grid metrics">
+    <div class="metric"><strong id="areas">–</strong>Audit areas</div><div class="metric"><strong id="sources">–</strong>Data sources</div>
+    <div class="metric"><strong id="rulesCount">–</strong>Active rules</div><div class="metric"><strong id="alarmsCount">–</strong>Open alarms</div>
+  </div>
+  <p id="message" role="status"></p>
+  <div class="grid columns">
+    <div class="grid">
+    <section class="panel"><h2>Add a data source</h2><form id="uploadForm" enctype="multipart/form-data">
+      <label>Name</label><input name="name" placeholder="e.g. Q2 invoice ledger">
+      <label>Audit area</label><select name="audit_area_id" id="uploadAreaSelect"></select>
+      <label>CSV or XLSX file</label><input name="file" type="file" accept=".csv,.xlsx" required>
+      <p><button>Upload and inspect</button></p>
+    </form></section>
+    <section class="panel"><h2>Create a control rule</h2><form id="ruleForm">
+      <label>Name</label><input name="name" required placeholder="e.g. Unusual invoice amount">
+      <label>Rule type</label><select name="rule_type" id="ruleType"><option value="numeric">Numeric comparison</option><option value="text">Text contains</option><option value="null">Missing value</option><option value="date">Date comparison</option><option value="duplicate">Duplicate key</option><option value="comparison">Cross-field comparison</option></select>
+      <label>Field</label><select name="field_name" id="fieldSelect"><option value="amount">amount</option></select>
+      <label>Operator</label><select name="operator" id="operatorSelect"><option>&gt;</option><option>&gt;=</option><option>&lt;</option><option>&lt;=</option><option>==</option><option>!=</option></select>
+      <label>Comparison value</label><input name="rule_value" id="ruleValue" required value="10000">
+      <label>Severity</label><select name="severity"><option>medium</option><option>high</option><option>critical</option><option>low</option></select>
+      <label>Audit area</label><select name="audit_area_id" id="areaSelect"></select>
+      <label>Data source</label><select name="data_source_id" id="sourceSelect"></select><p><button>Create rule</button></p>
+    </form></section></div>
+    <div class="grid">
+      <section class="panel"><h2>Control rules</h2><div id="rules"></div></section>
+      <section class="panel"><h2>Alerts</h2><div id="alarms"></div></section>
+    </div>
+  </div>
+</main>
+<script>
+const $=id=>document.getElementById(id); const api=(url,options={})=>fetch(url,{headers:{"Content-Type":"application/json"},...options}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.error||"Request failed");return d});
+const uploadApi=(url,body)=>fetch(url,{method:"POST",body}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.error||"Upload failed");return d});
+const esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+function notice(text,error=false){$("message").textContent=text;$("message").style.color=error?"var(--red)":"var(--green)"}
+async function refresh(){
+  const [summary,areas,sources,rules,alarms]=await Promise.all([api("/api/summary"),api("/api/audit-areas"),api("/api/data-sources"),api("/api/rules"),api("/api/alarms")]);
+  $("areas").textContent=summary.audit_areas;$("sources").textContent=summary.data_sources;$("rulesCount").textContent=summary.active_rules;$("alarmsCount").textContent=summary.open_alarms;
+  const areaOptions=areas.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join("");$("areaSelect").innerHTML=areaOptions;$("uploadAreaSelect").innerHTML=areaOptions;$("sourceSelect").innerHTML=sources.map(x=>`<option value="${x.id}">${esc(x.name)} (${x.record_count} records)</option>`).join("");
+  $("rules").innerHTML=rules.map(x=>`<article class="rule"><div class="row"><div><strong>${esc(x.name)}</strong><div class="muted">${esc(x.rule_type)}: ${esc(x.field_name)} · ${x.trigger_count} trigger(s)</div></div><button class="secondary" onclick="runRule(${x.id})">Run control</button></div></article>`).join("")||"No rules.";
+  $("alarms").innerHTML=alarms.map(x=>`<article class="alarm"><div class="row"><div><span class="badge ${esc(x.severity)}">${esc(x.severity)}</span> <strong>${esc(x.title)}</strong><div class="muted">${esc(x.message)} · ${esc(x.status)}</div></div>${x.status!=="resolved"?`<button class="secondary" onclick="setStatus(${x.id},'${x.status==='open'?'acknowledged':'resolved'}')">${x.status==='open'?'Acknowledge':'Resolve'}</button>`:""}</div><details><summary>Affected records</summary><pre>${esc(JSON.stringify(x.affected_records,null,2))}</pre></details></article>`).join("")||"Run a control to generate alerts.";
+}
+async function refreshFields(){const id=$("sourceSelect").value;if(!id)return;const schema=await api(`/api/data-sources/${id}/schema`);$("fieldSelect").innerHTML=schema.columns.map(x=>`<option value="${esc(x.name)}">${esc(x.name)}</option>`).join("")}
+async function runRule(id){try{const r=await api(`/api/rules/${id}/run`,{method:"POST"});notice(`Control scanned ${r.scanned_records} records and matched ${r.matched_records}.`);await refresh()}catch(e){notice(e.message,true)}}
+async function setStatus(id,status){try{await api(`/api/alarms/${id}/status`,{method:"PATCH",body:JSON.stringify({status})});notice(`Alert marked ${status}.`);await refresh()}catch(e){notice(e.message,true)}}
+$("sourceSelect").addEventListener("change",()=>refreshFields().catch(e=>notice(e.message,true)));
+$("uploadForm").addEventListener("submit",async e=>{e.preventDefault();try{const result=await uploadApi("/api/data-sources/upload",new FormData(e.target));notice(`Loaded ${result.record_count} records and discovered ${result.columns.length} columns.`);e.target.reset();await refresh();$("sourceSelect").value=String(result.source_id);await refreshFields()}catch(err){notice(err.message,true)}});
+$("ruleForm").addEventListener("submit",async e=>{e.preventDefault();const values=Object.fromEntries(new FormData(e.target));const type=values.rule_type;const value=values.rule_value;let parameters={operator:values.operator,value};if(type==="text")parameters={operator:"contains",value};if(type==="null")parameters={operator:"is_null"};if(type==="date")parameters={operator:values.operator,value};if(type==="duplicate")parameters={fields:[values.field_name]};if(type==="comparison")parameters={operator:values.operator,right_field:value};const payload={...values,parameters,threshold_value:type==="numeric"?value:0};delete payload.rule_value;try{await api("/api/rules",{method:"POST",body:JSON.stringify(payload)});notice("Control rule created.");e.target.reset();await refresh();await refreshFields()}catch(err){notice(err.message,true)}});
+refresh().then(refreshFields).catch(e=>notice(e.message,true));
+</script>
+</body>
+</html>
