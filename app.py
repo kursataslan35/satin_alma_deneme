@@ -18,7 +18,7 @@ from notification_policies import notification_policies_bp
 from reporting import reporting_bp
 from postgres_routes import postgres_bp
 from security import hash_password, record_event, require_role, security_bp
-from services.execution import run_rule as execute_rule
+from services.execution import claim_rule, release_rule, run_rule as execute_rule
 from services.rule_engine import InvalidRule, RULE_TYPES, evaluate_records
 from services.scheduler import disable_schedule, inspect_schedule, resume_schedule, run_due_rules
 from ops.readiness import readiness_report
@@ -384,7 +384,13 @@ def create_app(test_config=None):
         rule = db.get_or_404(AuditRule, rule_id)
         if not rule.is_active:
             return jsonify(error="rule is inactive"), 409
-        execution = execute_rule(rule, trigger="manual")
+        token = claim_rule(rule)
+        if not token:
+            return jsonify(error="rule is already running; try again when the current run finishes"), 409
+        try:
+            execution = execute_rule(rule, trigger="manual")
+        finally:
+            release_rule(rule.id, token)
         alarm = None
         if execution.matched_records:
             alarm = Alarm.query.filter_by(rule_id=rule.id).order_by(Alarm.id.desc()).first()
@@ -395,6 +401,8 @@ def create_app(test_config=None):
         db.session.commit()
         return jsonify(rule_id=rule.id, execution_id=execution.id, status=execution.status,
                        scanned_records=execution.scanned_records, matched_records=execution.matched_records,
+                       skipped_records=execution.skipped_records,
+                       skipped_examples=execution.skipped_examples or [],
                        alarm_id=alarm.id if alarm else None)
 
     @app.get("/api/rule-executions")
@@ -404,6 +412,8 @@ def create_app(test_config=None):
         return jsonify([{"id": item.id, "rule_id": item.rule_id, "rule_name": item.rule.name,
                          "status": item.status, "trigger": item.trigger,
                          "scanned_records": item.scanned_records, "matched_records": item.matched_records,
+                         "skipped_records": item.skipped_records,
+                         "skipped_examples": item.skipped_examples or [],
                          "error_message": item.error_message,
                          "started_at": item.started_at.isoformat(),
                          "finished_at": item.finished_at.isoformat() if item.finished_at else None}

@@ -4,12 +4,9 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
-
-from sqlalchemy import or_
 
 from models import AuditRule, RuleExecution, db, utcnow
-from services.execution import run_rule
+from services.execution import claim_rule, release_rule, run_rule
 
 
 @dataclass(frozen=True)
@@ -61,6 +58,7 @@ def _execution_summary(execution):
         "id": execution.id, "status": execution.status, "trigger": execution.trigger,
         "attempt": execution.attempt, "scanned_records": execution.scanned_records,
         "matched_records": execution.matched_records,
+        "skipped_records": execution.skipped_records,
         "started_at": execution.started_at.isoformat(),
         "finished_at": execution.finished_at.isoformat() if execution.finished_at else None,
         "error_message": execution.error_message,
@@ -109,23 +107,12 @@ def _expire_stale_executions(rule: AuditRule, now: datetime) -> int:
 
 
 def _claim(rule: AuditRule, now: datetime) -> str | None:
-    """Atomically claim a rule, preventing overlap across worker processes."""
-    token = str(uuid4())
-    lock_until = now + timedelta(seconds=max(1, rule.execution_timeout_seconds))
-    updated = AuditRule.query.filter(
-        AuditRule.id == rule.id,
-        AuditRule.schedule_enabled.is_(True),
-        or_(AuditRule.execution_lock_until.is_(None), AuditRule.execution_lock_until <= now),
-    ).update({AuditRule.execution_lock_token: token, AuditRule.execution_lock_until: lock_until}, synchronize_session=False)
-    db.session.commit()
-    return token if updated == 1 else None
+    """Atomically claim a rule, preventing overlap across worker processes and manual runs."""
+    return claim_rule(rule, now=now, require_schedule=True)
 
 
 def _release(rule_id: int, token: str) -> None:
-    AuditRule.query.filter(AuditRule.id == rule_id, AuditRule.execution_lock_token == token).update(
-        {AuditRule.execution_lock_token: None, AuditRule.execution_lock_until: None}, synchronize_session=False
-    )
-    db.session.commit()
+    release_rule(rule_id, token)
 
 
 def run_scheduler_cycle(*, now=None) -> SchedulerCycle:

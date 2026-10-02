@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from models import DataSource, FieldMapping, QualityCheck, QualityCheckRun, db, utcnow
 from security import require_role
+from services.locale_values import parse_number
 from services.mapping import MappingApplicationError, apply_mappings
 
 
@@ -152,7 +153,7 @@ def execute_quality_check(check: QualityCheck) -> QualityCheckRun:
             failed = value not in (None, "") and counts[_stable_value(value)] > 1
         elif check.check_type == "numeric_range":
             try:
-                number = float(value)
+                number = parse_number(value)
                 failed = ((parameters.get("min") is not None and number < float(parameters["min"])) or
                           (parameters.get("max") is not None and number > float(parameters["max"])))
             except (TypeError, ValueError):

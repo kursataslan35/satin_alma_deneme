@@ -11,7 +11,7 @@ services:
     plan: free
     buildCommand: pip install -r requirements.txt
     preDeployCommand: flask --app app db upgrade
-    startCommand: gunicorn --bind 0.0.0.0:$PORT app:app
+    startCommand: gunicorn --bind 0.0.0.0:$PORT production:app
     healthCheckPath: /health
     envVars:
       - key: AUDITAI_ENV

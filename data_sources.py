@@ -77,12 +77,20 @@ def _bounded_rows(rows, headers: list[str], max_rows: int) -> list[dict[str, Any
     return records
 
 
+def _csv_delimiter(text: str) -> str:
+    """Excel in Turkish locales exports ';'-separated CSV because ',' is the decimal mark."""
+    header = text.split("\n", 1)[0]
+    counts = {delimiter: header.count(delimiter) for delimiter in (",", ";", "\t")}
+    best = max(counts, key=counts.get)
+    return best if counts[best] > counts[","] else ","
+
+
 def parse_csv(content: bytes, max_rows: int, max_columns: int) -> tuple[list[dict], list[dict]]:
     try:
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise IngestionError("CSV files must use UTF-8 encoding") from exc
-    reader = csv.reader(io.StringIO(text))
+    reader = csv.reader(io.StringIO(text), delimiter=_csv_delimiter(text))
     try:
         headers = _unique_headers(next(reader))
     except StopIteration as exc:

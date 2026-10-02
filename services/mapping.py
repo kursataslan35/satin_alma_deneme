@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Iterable, Sequence
 
 from models import FieldMapping
+from services.locale_values import parse_date, parse_datetime, parse_number
 
 
 class MappingApplicationError(ValueError):
@@ -136,8 +136,8 @@ def _convert(value: Any, transformation: str, target_type: str) -> Any:
 def _integer(value: Any) -> int:
     if isinstance(value, bool):
         raise ValueError("boolean cannot be converted to integer")
-    number = float(str(value).strip())
-    if not math.isfinite(number) or not number.is_integer():
+    number = parse_number(value)
+    if not number.is_integer():
         raise ValueError("value is not an integer")
     return int(number)
 
@@ -145,10 +145,7 @@ def _integer(value: Any) -> int:
 def _number(value: Any) -> float:
     if isinstance(value, bool):
         raise ValueError("boolean cannot be converted to number")
-    number = float(str(value).strip())
-    if not math.isfinite(number):
-        raise ValueError("number must be finite")
-    return number
+    return parse_number(value)
 
 
 def _boolean(value: Any) -> bool:
@@ -167,13 +164,13 @@ def _date(value: Any) -> str:
         return value.date().isoformat()
     if isinstance(value, date):
         return value.isoformat()
-    return date.fromisoformat(str(value).strip()).isoformat()
+    return parse_date(value).isoformat()
 
 
 def _datetime(value: Any) -> str:
     if isinstance(value, datetime):
         return value.isoformat()
-    return datetime.fromisoformat(str(value).strip().replace("Z", "+00:00")).isoformat()
+    return parse_datetime(value).isoformat()
 
 
 def _empty(value: Any) -> bool:

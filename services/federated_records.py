@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import math
 import re
 from dataclasses import dataclass
 from typing import Any
 
+from services.locale_values import parse_number
 from services.mapping import MappingApplicationError, apply_mappings
 
 
@@ -165,8 +165,7 @@ def _join_key(value: Any, operator: str):
         if isinstance(value, bool):
             return None
         try:
-            number = float(value)
-            return number if math.isfinite(number) else None
+            return parse_number(value)
         except (TypeError, ValueError):
             return None
     raise FederatedLoadError("unsupported join operator")

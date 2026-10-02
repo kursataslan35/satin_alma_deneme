@@ -214,6 +214,7 @@ def execution_history():
     return jsonify([{"id": item.id, "rule_id": item.rule_id, "rule_name": item.rule.name,
                      "status": item.status, "trigger": item.trigger, "attempt": item.attempt,
                      "scanned_records": item.scanned_records, "matched_records": item.matched_records,
+                     "skipped_records": item.skipped_records,
                      "started_at": item.started_at.isoformat(),
                      "finished_at": item.finished_at.isoformat() if item.finished_at else None}
                     for item in items])

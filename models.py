@@ -275,6 +275,8 @@ class RuleExecution(db.Model):
     attempt = db.Column(db.Integer, nullable=False, default=1)
     scanned_records = db.Column(db.Integer, nullable=False, default=0)
     matched_records = db.Column(db.Integer, nullable=False, default=0)
+    skipped_records = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    skipped_examples = db.Column(db.JSON, nullable=True)
     error_message = db.Column(db.Text, nullable=True)
     started_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
     finished_at = db.Column(db.DateTime(timezone=True), nullable=True)

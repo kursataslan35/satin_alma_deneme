@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-import math
 from typing import Any, Iterable, Mapping
+
+from services.locale_values import parse_number
 
 
 class DetectorError(ValueError):
@@ -74,12 +75,7 @@ def finite_matrix(records: Iterable[Mapping[str, Any]], fields: tuple[str, ...])
         try:
             for field in fields:
                 value = record.get(field)
-                if isinstance(value, bool):
-                    raise ValueError
-                number = float(value)
-                if not math.isfinite(number):
-                    raise ValueError
-                values.append(number)
+                values.append(parse_number(value))
         except (TypeError, ValueError):
             invalid += 1
             continue

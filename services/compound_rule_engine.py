@@ -7,6 +7,8 @@ from datetime import date, datetime
 import operator
 from typing import Any, Iterable, Mapping
 
+from services.locale_values import parse_date, parse_number
+
 
 MAX_DEPTH = 8
 MAX_CONDITIONS = 100
@@ -171,9 +173,7 @@ def _validate_condition(node: Mapping[str, Any], path: str) -> dict:
 
 def _coerce(value: Any, value_type: str):
     if value_type == "number":
-        if isinstance(value, bool):
-            raise ValueError
-        return float(value)
+        return parse_number(value)
     if value_type == "text":
         return str(value)
     if value_type == "date":
@@ -181,7 +181,7 @@ def _coerce(value: Any, value_type: str):
             return value.date()
         if isinstance(value, date):
             return value
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
+        return parse_date(value)
     return value
 
 
