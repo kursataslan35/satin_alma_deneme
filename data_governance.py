@@ -2,22 +2,21 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from typing import Any
 
 from flask import Blueprint, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
-from models import DataSource, FieldMapping, QualityCheck, QualityCheckRun, db, utcnow
-from security import require_role
-from services.locale_values import parse_number
+from models import DataSource, FieldMapping, QualityCheck, QualityCheckRun, db
+from security import record_event, require_role
 from services.mapping import MappingApplicationError, apply_mappings
+from services.profiling import profile_records, suggest_quality_checks
+from services.quality_gate import CHECK_SEVERITIES, CHECK_TYPES, execute_quality_check, run_quality_gate
 
 
 data_governance_bp = Blueprint("data_governance", __name__)
 TARGET_TYPES = {"string", "integer", "number", "boolean", "date", "datetime"}
 TRANSFORMATIONS = {"none", "trim", "lower", "upper", "to_integer", "to_number"}
-CHECK_TYPES = {"not_null", "unique", "numeric_range", "accepted_values"}
 
 
 def _source_fields(source: DataSource) -> set[str]:
@@ -39,7 +38,8 @@ def _mapping_json(mapping: FieldMapping) -> dict[str, Any]:
 def _check_json(check: QualityCheck) -> dict[str, Any]:
     return {"id": check.id, "data_source_id": check.data_source_id, "name": check.name,
             "check_type": check.check_type, "field_name": check.field_name,
-            "parameters": check.parameters or {}, "is_active": check.is_active,
+            "parameters": check.parameters or {}, "severity": check.severity,
+            "is_active": check.is_active,
             "last_run_at": check.last_run_at.isoformat() if check.last_run_at else None}
 
 
@@ -110,6 +110,11 @@ def _validate_check(source: DataSource, payload: dict, partial: bool = False) ->
         if not isinstance(parameters, dict):
             raise ValueError("parameters must be an object")
         result["parameters"] = parameters
+    if "severity" in payload:
+        severity = str(payload["severity"])
+        if severity not in CHECK_SEVERITIES:
+            raise ValueError("severity must be critical or warning")
+        result["severity"] = severity
     if "is_active" in payload:
         if not isinstance(payload["is_active"], bool):
             raise ValueError("is_active must be boolean")
@@ -118,7 +123,17 @@ def _validate_check(source: DataSource, payload: dict, partial: bool = False) ->
 
 
 def _validate_check_parameters(check_type: str, parameters: dict) -> None:
-    if check_type == "numeric_range":
+    if parameters.get("tolerance_percent") is not None:
+        try:
+            tolerance = float(parameters["tolerance_percent"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("tolerance_percent must be numeric") from exc
+        if not 0 <= tolerance <= 100:
+            raise ValueError("tolerance_percent must be between 0 and 100")
+    if check_type == "type_conformance":
+        if parameters.get("type") not in {"number", "date"}:
+            raise ValueError("type_conformance requires type number or date")
+    elif check_type == "numeric_range":
         if parameters.get("min") is None and parameters.get("max") is None:
             raise ValueError("numeric_range requires min and/or max")
         for name in ("min", "max"):
@@ -132,51 +147,6 @@ def _validate_check_parameters(check_type: str, parameters: dict) -> None:
             raise ValueError("accepted_values requires a non-empty values list")
         if len(parameters["values"]) > 1_000:
             raise ValueError("accepted_values supports at most 1000 values")
-
-
-def execute_quality_check(check: QualityCheck) -> QualityCheckRun:
-    records = list((check.data_source.config or {}).get("records", []))
-    started = utcnow()
-    failures: list[dict[str, Any]] = []
-    field = check.field_name
-    parameters = check.parameters or {}
-    counts = Counter(_stable_value(record.get(field)) for record in records
-                     if record.get(field) not in (None, "")) if check.check_type == "unique" else Counter()
-    accepted = {_stable_value(item) for item in parameters.get("values", [])}
-
-    for index, record in enumerate(records):
-        value = record.get(field)
-        failed = False
-        if check.check_type == "not_null":
-            failed = value is None or (isinstance(value, str) and not value.strip())
-        elif check.check_type == "unique":
-            failed = value not in (None, "") and counts[_stable_value(value)] > 1
-        elif check.check_type == "numeric_range":
-            try:
-                number = parse_number(value)
-                failed = ((parameters.get("min") is not None and number < float(parameters["min"])) or
-                          (parameters.get("max") is not None and number > float(parameters["max"])))
-            except (TypeError, ValueError):
-                failed = True
-        elif check.check_type == "accepted_values":
-            failed = _stable_value(value) not in accepted
-        if failed:
-            failures.append({"row_index": index, "value": value})
-
-    scanned = len(records)
-    failed_count = len(failures)
-    run = QualityCheckRun(quality_check=check, status="passed" if failed_count == 0 else "failed",
-                          scanned_records=scanned, failed_records=failed_count,
-                          pass_rate=round(((scanned - failed_count) / scanned * 100), 2) if scanned else 100.0,
-                          failure_sample=failures[:100], started_at=started, finished_at=utcnow())
-    check.last_run_at = run.finished_at
-    db.session.add(run)
-    db.session.commit()
-    return run
-
-
-def _stable_value(value: Any) -> str:
-    return f"{type(value).__name__}:{value!r}"
 
 
 @data_governance_bp.get("/api/data-sources/<int:source_id>/mappings")
@@ -318,3 +288,65 @@ def list_check_runs(check_id):
     runs = QualityCheckRun.query.filter_by(quality_check_id=check.id).order_by(
         QualityCheckRun.started_at.desc()).limit(100).all()
     return jsonify([_run_json(item) for item in runs])
+
+
+def _source_profile(source: DataSource) -> dict[str, Any]:
+    config = source.config or {}
+    return profile_records(config.get("records", []),
+                           [str(item.get("name")) for item in config.get("columns", []) if item.get("name")])
+
+
+@data_governance_bp.get("/api/data-sources/<int:source_id>/profile")
+@require_role()
+def source_profile(source_id):
+    source = db.get_or_404(DataSource, source_id)
+    profile = _source_profile(source)
+    existing = {(item.field_name, item.check_type) for item in source.quality_checks}
+    suggestions = [{**item, "already_exists": (item["field_name"], item["check_type"]) in existing}
+                   for item in suggest_quality_checks(profile)]
+    return jsonify(source_id=source.id, source_name=source.name, profile=profile,
+                   suggestions=suggestions)
+
+
+@data_governance_bp.post("/api/data-sources/<int:source_id>/quality-checks/bulk")
+@require_role("auditor")
+def create_checks_bulk(source_id):
+    source = db.get_or_404(DataSource, source_id)
+    payload = request.get_json(silent=True) or {}
+    items = payload.get("checks")
+    if not isinstance(items, list) or not items or len(items) > 200:
+        return jsonify(error="checks must be a list of 1-200 quality checks"), 400
+    existing_names = {item.name for item in source.quality_checks}
+    created = []
+    try:
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                raise ValueError(f"checks[{index}] must be an object")
+            values = _validate_check(source, item)
+            _validate_check_parameters(values["check_type"], values["parameters"])
+            if values["name"] in existing_names:
+                raise ValueError(f"quality check name already exists: {values['name']}")
+            existing_names.add(values["name"])
+            check = QualityCheck(data_source=source, **values)
+            db.session.add(check)
+            created.append(check)
+        db.session.flush()
+        record_event("quality_checks_created", "data_source", source.id,
+                     {"checks": [{"id": item.id, "name": item.name, "severity": item.severity}
+                                 for item in created]})
+        db.session.commit()
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify(error=str(exc)), 400
+    return jsonify([_check_json(item) for item in created]), 201
+
+
+@data_governance_bp.post("/api/data-sources/<int:source_id>/quality-checks/run")
+@require_role("auditor")
+def run_source_checks(source_id):
+    source = db.get_or_404(DataSource, source_id)
+    gate = run_quality_gate([source])
+    record_event("quality_gate_run", "data_source", source.id,
+                 {"status": gate["status"], "failed_count": gate["failed_count"]})
+    db.session.commit()
+    return jsonify(gate)

@@ -170,6 +170,8 @@ class QualityCheck(db.Model):
     check_type = db.Column(db.String(32), nullable=False)
     field_name = db.Column(db.String(128), nullable=False)
     parameters = db.Column(db.JSON, nullable=False, default=dict)
+    # critical: a failure blocks audit controls on this source; warning: controls run but are flagged.
+    severity = db.Column(db.String(16), nullable=False, default="warning", server_default="warning")
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     last_run_at = db.Column(db.DateTime(timezone=True), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
@@ -277,6 +279,8 @@ class RuleExecution(db.Model):
     matched_records = db.Column(db.Integer, nullable=False, default=0)
     skipped_records = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     skipped_examples = db.Column(db.JSON, nullable=True)
+    quality_status = db.Column(db.String(16), nullable=True)
+    quality_summary = db.Column(db.JSON, nullable=True)
     error_message = db.Column(db.Text, nullable=True)
     started_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
     finished_at = db.Column(db.DateTime(timezone=True), nullable=True)

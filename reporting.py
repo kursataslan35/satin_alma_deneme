@@ -215,6 +215,7 @@ def execution_history():
                      "status": item.status, "trigger": item.trigger, "attempt": item.attempt,
                      "scanned_records": item.scanned_records, "matched_records": item.matched_records,
                      "skipped_records": item.skipped_records,
+                     "quality_status": item.quality_status, "error_message": item.error_message,
                      "started_at": item.started_at.isoformat(),
                      "finished_at": item.finished_at.isoformat() if item.finished_at else None}
                     for item in items])

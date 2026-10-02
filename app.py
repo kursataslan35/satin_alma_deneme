@@ -403,6 +403,9 @@ def create_app(test_config=None):
                        scanned_records=execution.scanned_records, matched_records=execution.matched_records,
                        skipped_records=execution.skipped_records,
                        skipped_examples=execution.skipped_examples or [],
+                       quality_status=execution.quality_status,
+                       quality_summary=execution.quality_summary,
+                       error_message=execution.error_message,
                        alarm_id=alarm.id if alarm else None)
 
     @app.get("/api/rule-executions")
@@ -414,6 +417,7 @@ def create_app(test_config=None):
                          "scanned_records": item.scanned_records, "matched_records": item.matched_records,
                          "skipped_records": item.skipped_records,
                          "skipped_examples": item.skipped_examples or [],
+                         "quality_status": item.quality_status,
                          "error_message": item.error_message,
                          "started_at": item.started_at.isoformat(),
                          "finished_at": item.finished_at.isoformat() if item.finished_at else None}

@@ -59,6 +59,7 @@ def _execution_summary(execution):
         "attempt": execution.attempt, "scanned_records": execution.scanned_records,
         "matched_records": execution.matched_records,
         "skipped_records": execution.skipped_records,
+        "quality_status": execution.quality_status,
         "started_at": execution.started_at.isoformat(),
         "finished_at": execution.finished_at.isoformat() if execution.finished_at else None,
         "error_message": execution.error_message,

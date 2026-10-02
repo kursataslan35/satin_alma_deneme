@@ -14,6 +14,7 @@ from services.detectors import get_detector
 from services.mapping import mapped_records_for_rule
 from services.federated_records import load_federated_records
 from services.compound_rule_engine import evaluate_compound_rule
+from services.quality_gate import run_quality_gate
 from notification_policies import enqueue_alarm_notifications
 
 
@@ -100,6 +101,16 @@ def run_rule(rule: AuditRule, *, trigger: str = "manual", attempt: int = 1) -> R
     db.session.commit()
     execution_id = execution.id
     try:
+        # Data quality runs first, on the same records the control is about to read.
+        gate = run_quality_gate([rule.data_source, *(link.data_source for link in rule.source_links)])
+        quality = {"quality_status": gate["status"], "quality_summary": gate}
+        if gate["status"] == "blocked":
+            _finish(execution_id, {**quality, "status": "blocked", "finished_at": utcnow(),
+                                   "error_message": "critical data-quality checks failed: "
+                                                    + ", ".join(gate["blocking"])})
+            db.session.commit()
+            db.session.refresh(execution)
+            return execution
         scanned, matched, matches, label, skipped, skipped_examples = _evaluate(rule)
         finished_at = utcnow()
         if _naive_utc(finished_at) - _naive_utc(started_at) > timeout:
@@ -113,7 +124,7 @@ def run_rule(rule: AuditRule, *, trigger: str = "manual", attempt: int = 1) -> R
         if not _finish(execution_id, {"status": "completed", "scanned_records": scanned,
                                       "matched_records": matched, "skipped_records": skipped,
                                       "skipped_examples": skipped_examples or None,
-                                      "finished_at": finished_at}):
+                                      "finished_at": finished_at, **quality}):
             # Another worker already marked this run timed out; its evidence is not trusted.
             db.session.rollback()
             db.session.refresh(execution)
@@ -124,6 +135,8 @@ def run_rule(rule: AuditRule, *, trigger: str = "manual", attempt: int = 1) -> R
                        f"{len(matches)} retained as evidence")
             if skipped:
                 message += f"; {skipped} record(s) could not be parsed and were not evaluated"
+            if gate["status"] == "warning":
+                message += "; data-quality warnings: " + ", ".join(gate["warnings"])
             alarm = Alarm(title=rule.name, message=message, severity=rule.severity,
                           affected_records=matches, rule=rule, audit_area=rule.audit_area,
                           data_source=rule.data_source)
