@@ -1,0 +1,6 @@
+# Gerçek veri ve üretilen raporlar asla git'e girmez.
+veri/*
+!veri/.gitkeep
+raporlar/*
+!raporlar/.gitkeep
+.venv/

@@ -23,3 +23,8 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m compileall -q app.py models.py src tests
       - run: pytest -q
+      - name: Denetim analitiği testleri
+        working-directory: denetim-analitigi
+        run: |
+          pip install -r requirements.txt
+          python -m pytest -q
