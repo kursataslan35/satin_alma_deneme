@@ -115,3 +115,19 @@ def test_auditor_feedback_produces_measurable_detector_metrics(client):
     assert performance["true_positives"] == 1
     assert performance["precision"] == 1.0
     assert performance["status"] == "insufficient_feedback"
+
+
+def test_trusted_proxy_headers_keep_csrf_origin_check_working(tmp_path):
+    from app import create_app
+    application = create_app({"TESTING": True, "CSRF_ENABLED": True, "TRUSTED_PROXY_HOPS": 1,
+                              "SQLALCHEMY_DATABASE_URI": f"sqlite:///{tmp_path / 'proxy.db'}"})
+    client = application.test_client()
+    forwarded = {"X-Forwarded-Host": "demo-5000.app.github.dev", "X-Forwarded-Proto": "https",
+                 "Origin": "https://demo-5000.app.github.dev"}
+    token = client.get("/api/auth/csrf", headers=forwarded).get_json()["csrf_token"]
+    response = client.post("/api/auth/login", json={"email": "x@y.z", "password": "wrong"},
+                           headers={**forwarded, "X-CSRF-Token": token})
+    assert response.status_code == 401  # reached the login check, not rejected as cross-origin
+    rejected = client.post("/api/auth/login", json={}, headers={"Origin": "https://demo-5000.app.github.dev",
+                                                                "X-CSRF-Token": token})
+    assert rejected.status_code == 403

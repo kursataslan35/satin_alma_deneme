@@ -7,6 +7,7 @@ from pathlib import Path
 
 import click
 from flask import Flask, jsonify, render_template, request
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import build_runtime_config
 from csrf import init_csrf
@@ -114,6 +115,11 @@ def create_app(test_config=None):
                       EVIDENCE_SAMPLE_LIMIT=int(os.environ.get("EVIDENCE_SAMPLE_LIMIT", "1000")))
     if test_config:
         app.config.update(test_config)
+    proxy_hops = int(app.config.get("TRUSTED_PROXY_HOPS", os.environ.get("AUDITAI_TRUSTED_PROXY_HOPS") or 0))
+    if proxy_hops > 0:
+        # Behind Render, Codespaces or another reverse proxy the browser's host, scheme and IP
+        # arrive in X-Forwarded-* headers; trust exactly that many proxy hops.
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=proxy_hops, x_proto=proxy_hops, x_host=proxy_hops)
     init_csrf(app)
     Path(app.instance_path).mkdir(parents=True, exist_ok=True)
     db.init_app(app)

@@ -1,0 +1,13 @@
+{
+  "name": "AuditAI",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "postCreateCommand": "pip install -r requirements.txt",
+  "containerEnv": {
+    "FLASK_APP": "app",
+    "AUDITAI_TRUSTED_PROXY_HOPS": "1"
+  },
+  "forwardPorts": [5000],
+  "portsAttributes": {
+    "5000": {"label": "AuditAI", "onAutoForward": "openBrowser"}
+  }
+}
